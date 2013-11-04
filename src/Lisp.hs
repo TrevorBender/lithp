@@ -148,7 +148,7 @@ instance Error LispError where
 
 type ThrowsError = Either LispError
 
-trapError ::  ThrowsError String -> ThrowsError String
+trapError ::  IOThrowsError String -> IOThrowsError String
 trapError action = catchError action (return . show)
 
 extractValue :: ThrowsError a -> a
@@ -175,7 +175,7 @@ instance Show LispVal where
 --}}}
 
 -- Evaluation -----------------------------------------------------------------{{{
-eval :: LispVal -> ThrowsError LispVal
+eval :: LispVal -> IOThrowsError LispVal
 eval val@(String _) = return val
 eval val@(Number _) = return val
 eval val@(Bool _) = return val
@@ -185,7 +185,7 @@ eval (List [Atom "if", pred, conseq, alt]) = do
     case result of
          Bool False -> eval alt
          otherwise  -> eval conseq
-eval (List (Atom func : args)) = mapM eval args >>= apply func
+eval (List (Atom func : args)) = mapM eval args >>= liftThrows . apply func
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
@@ -310,8 +310,8 @@ unpackNum notNum = throwError $ TypeMismatch "number" notNum
 
 -- REPL ---------------------------------------------------------------------{{{
 
-readEval :: String -> ThrowsError LispVal
-readEval x = readExpr x >>= eval
+readEval :: String -> IOThrowsError LispVal
+readEval x = liftThrows (readExpr x) >>= eval
 
 flushStr :: String -> IO ()
 flushStr str = putStr str *> hFlush stdout
@@ -320,9 +320,9 @@ readPrompt :: String -> IO String
 readPrompt prompt = flushStr prompt *> getLine
 
 evalAndPrint :: String -> IO ()
-evalAndPrint expr = putStrLn $ evalString expr
-    where evalString :: String -> String
-          evalString expr = extractValue $ trapError (show <$> readEval expr)
+evalAndPrint expr = evalString expr >>= putStrLn
+    where evalString :: String -> IO String
+          evalString expr = runIOThrows $ liftM show $ (liftThrows $ readExpr expr) >>= eval
 
 until_ :: Monad m => (a -> Bool) -> m a -> (a -> m()) -> m ()
 until_ pred prompt action = do
@@ -339,6 +339,20 @@ main = runRepl
 --}}}
 
 -- Variables -----------------------------------------------------------------{{{
+
+type Env = IORef [(String, IORef LispVal)]
+
+nullEnv :: IO Env
+nullEnv = newIORef []
+
+type IOThrowsError a = ErrorT LispError IO a
+
+liftThrows :: ThrowsError a -> IOThrowsError a
+liftThrows (Left err) = throwError err
+liftThrows (Right val) = return val
+
+runIOThrows :: IOThrowsError String -> IO String
+runIOThrows action = runErrorT (trapError action) >>= return . extractValue
 
 --}}}
 
