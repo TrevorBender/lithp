@@ -1,11 +1,12 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ExistentialQuantification #-}
 
-import Control.Applicative ((<$>), (*>), (<*), (<*>))
-import Control.Monad (liftM)
-import "mtl" Control.Monad.Error
-import System.IO (hGetContents, stdin, hFlush, stdout)
-import Text.ParserCombinators.Parsec hiding (spaces)
+import                  Control.Applicative ((<$>), (*>), (<*), (<*>))
+import                  Control.Monad (liftM)
+import      "mtl"       Control.Monad.Error
+import                  Data.IORef
+import                  System.IO (hGetContents, stdin, hFlush, stdout)
+import                  Text.ParserCombinators.Parsec hiding (spaces)
 
 data LispVal = Atom String
              | List [LispVal]
@@ -14,14 +15,22 @@ data LispVal = Atom String
              | String String
              | Bool Bool
 
+data LispError = NumArgs Integer [LispVal]
+               | TypeMismatch String LispVal
+               | Parser ParseError
+               | BadSpecialForm String LispVal
+               | NotFunction String String
+               | UnboundVar String String
+               | Default String
+
+-- Parsing ------------------------------------------------------------------{{{
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
 spaces = skipMany1 space
 
-
--- Monadic style parsers
+-- Monadic style parsers ------------------------------------------------------{{{
 
 parseStringM :: Parser LispVal
 parseStringM = do
@@ -67,8 +76,9 @@ parseQuotedM = do
     char '\''
     x <- parseExprM
     return $ List [Atom "quote", x]
+--}}}
 
--- Applicative style parsers
+-- Applicative style parsers --------------------------------------------------{{{
 
 parseStringA :: Parser LispVal
 parseStringA = String <$> (char '"' *> many (noneOf "\"") <* char '"')
@@ -115,16 +125,10 @@ readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExprA "lisp" input of
                       Left err  -> throwError . Parser $ err
                       Right val -> return val
+--}}}
+--}}}
 
--- Evalutation 
-
-data LispError = NumArgs Integer [LispVal]
-               | TypeMismatch String LispVal
-               | Parser ParseError
-               | BadSpecialForm String LispVal
-               | NotFunction String String
-               | UnboundVar String String
-               | Default String
+-- Error ----------------------------------------------------------------------{{{
 
 showError :: LispError -> String
 showError (Parser parseErr) = "Parse error at " ++ show parseErr
@@ -150,6 +154,9 @@ trapError action = catchError action (return . show)
 extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
 
+--}}}
+
+-- Show ----------------------------------------------------------------------{{{
 showVal :: LispVal -> String
 showVal (String str) = surround '"' str
     where surround x ys = x : (ys ++ [x])
@@ -165,7 +172,9 @@ unwordsList = unwords . map showVal
 
 instance Show LispVal where
     show = showVal
+--}}}
 
+-- Evaluation -----------------------------------------------------------------{{{
 eval :: LispVal -> ThrowsError LispVal
 eval val@(String _) = return val
 eval val@(Number _) = return val
@@ -234,6 +243,8 @@ cons badArgList = throwError $ NumArgs 2 badArgList
 
 -- }}}
 
+-- Equality operations -------------------------------------------------------{{{
+
 eqv :: [LispVal] -> ThrowsError LispVal
 eqv [(Bool arg1), (Bool arg2)] = return $ Bool $ arg1 == arg2
 eqv [(Number arg1), (Number arg2)] = return $ Bool $ arg1 == arg2
@@ -260,6 +271,7 @@ equal [arg1, arg2] = do
     eqvEquals <- eqv [arg1, arg2]
     return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
 equal badArgs = throwError $ NumArgs 2 badArgs
+--}}}
 
 boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 boolBinop unpack op args = if length args /= 2
@@ -294,6 +306,9 @@ unpackNum (String n) = let parsed = reads n :: [(Integer, String)] in
                                     else return $ fst $ parsed !! 0
 unpackNum (List [n]) = unpackNum n
 unpackNum notNum = throwError $ TypeMismatch "number" notNum
+--}}}
+
+-- REPL ---------------------------------------------------------------------{{{
 
 readEval :: String -> ThrowsError LispVal
 readEval x = readExpr x >>= eval
@@ -320,3 +335,10 @@ runRepl :: IO ()
 runRepl = until_ (== "quit") (readPrompt "Lisp>>> ") evalAndPrint
 
 main = runRepl
+
+--}}}
+
+-- Variables -----------------------------------------------------------------{{{
+
+--}}}
+
