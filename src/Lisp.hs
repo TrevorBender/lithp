@@ -116,6 +116,9 @@ parseNumberA = (Number . read) <$> many1 digit
 
 a <||> b = try a <|> b
 
+parseComment :: Parser ()
+parseComment = char ';' *> many (noneOf "\n") *> char '\n' *> return ()
+
 parseExprA :: Parser LispVal
 parseExprA = parseAtomA
          <|> parseStringA
@@ -150,7 +153,9 @@ readExpr :: String -> ThrowsError LispVal
 readExpr = readOrThrow parseExprA
 
 readExprList :: String -> ThrowsError [LispVal]
-readExprList = readOrThrow (endBy parseExprA spaces)
+readExprList = readOrThrow $ do
+    skipMany parseComment
+    sepEndBy1 parseExprA (spaces >> skipMany parseComment)
 
 --}}}
 

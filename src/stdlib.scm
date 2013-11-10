@@ -11,11 +11,13 @@
 (define (odd? num)      (= (mod num 2) 1))
 (define (even? num)     (not (odd? num)))
 
+; foldr :: (a -> b -> b) -> b -> [a]
 (define (foldr func end lst)
   (if (null? lst)
     end
     (func (car lst) (foldr func end (cdr lst)))))
 
+; foldl :: (b -> a -> b) -> b -> [a]
 (define (foldl func accum lst)
   (if (null? lst)
     accum
